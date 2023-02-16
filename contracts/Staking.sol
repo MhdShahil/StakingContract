@@ -4,7 +4,9 @@ pragma solidity ^0.8.16;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract Staking {
+//import "@openzeppelin/contracts/utils/math/Math.sol";
+
+contract Staking is Ownable {
     /* Contract state variables */
     IERC20 public token; //staking token
     uint256 public currentTotalStake; //total stakes in the platform
@@ -23,16 +25,10 @@ contract Staking {
     /* Events */
     event StakeDeposited(address indexed account, uint256 amount);
     event WithdrawExecuted(address indexed account, uint256 amount);
-
-    /* Modifiers */
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Staking: Address unauthorized");
-        _;
-    }
+    event RewardClaimed(address indexed account, uint256 reward);
 
     /* Constructor */
     constructor(address _stakingToken) {
-        owner = msg.sender;
         require(_stakingToken != address(0), "Staking: Invalid token address");
 
         token = IERC20(_stakingToken);
@@ -80,15 +76,11 @@ contract Staking {
 
     /**
      * @notice This function is used to claim rewards of staked tokens
+     * @param stakeDeposit address of the staker
      */
-    function _calculateRewards(
+    function calculateRewards(
         StakeDeposit memory stakeDeposit
-    ) private view returns (uint256) {
-        //StakeDeposit memory stakeDeposit = _stakeDeposits[msg.sender];
-        require(
-            stakeDeposit.amount != 0,
-            "Staking: There is no stake deposit for this account"
-        );
+    ) private pure returns (uint256) {
         uint256 reward = stakeDeposit.amount / 100;
         stakeDeposit.rewards = reward;
         return stakeDeposit.rewards;
@@ -97,8 +89,8 @@ contract Staking {
     /**
      * @notice This function is used to claim rewards of staked tokens
      */
-    function claimRewards() external {
-        StakeDeposit storage stakeDeposit = _stakeDeposits[msg.sender];
+    function claimRewards(address _user) external {
+        StakeDeposit memory stakeDeposit = _stakeDeposits[_user];
         require(
             stakeDeposit.exists,
             "Staking: This account doesn't have stake deposits"
@@ -107,12 +99,14 @@ contract Staking {
             stakeDeposit.rewards != 0,
             "Staking: Reward tokens already claimed"
         );
-        uint256 adminFee = (_stakeDeposits[msg.sender].rewards * 2) / 100;
-        uint256 tokenToTransfer = _stakeDeposits[msg.sender].rewards - adminFee;
-        _stakeDeposits[msg.sender].rewards = 0;
-        totalAdminCommission += adminFee;
 
-        token.transfer(msg.sender, tokenToTransfer);
+        uint256 adminFee = (stakeDeposit.rewards * 2) / 100;
+        totalAdminCommission += adminFee;
+        uint256 tokenToTransfer = stakeDeposit.rewards - adminFee;
+        stakeDeposit.rewards = 0;
+
+        token.transfer(_user, tokenToTransfer);
+        emit RewardClaimed(_user, tokenToTransfer);
     }
 
     /**
@@ -157,7 +151,7 @@ contract Staking {
     function getAdminCommissionDetails()
         external
         view
-        returns (uint256 initialDeposit)
+        returns (uint256 adminCommission)
     {
         return totalAdminCommission;
     }
@@ -165,10 +159,26 @@ contract Staking {
     /**
      * @notice Helper function to to check whether the address is a staker
      */
-    function checkUserStakerStatus(address _user) external view returns (bool) {
+    function checkUserStakerStatus(address _user) external view {
         StakeDeposit memory stakeDeposit = _stakeDeposits[_user];
-        if (stakeDeposit.exists) {
-            return true;
-        }
+        require(stakeDeposit.exists, "Staking: User not Staker");
+    }
+
+    /**
+     * @notice Helper function to to get details of the staker
+     * @param account Address of the stakers account
+     */
+    function getStakeDetails(
+        address account
+    ) external view returns (uint256 stakeDeposit, uint256 rewards) {
+        require(
+            _stakeDeposits[account].exists &&
+                _stakeDeposits[account].amount != 0,
+            "Staking: This account doesn't have a stake deposit"
+        );
+
+        StakeDeposit memory s = _stakeDeposits[account];
+
+        return (s.amount, calculateRewards(s));
     }
 }
